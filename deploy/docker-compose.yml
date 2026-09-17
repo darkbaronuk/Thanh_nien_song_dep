@@ -1,0 +1,42 @@
+services:
+  api:
+    build: ..
+    image: tnsd2026-api:latest
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATA_DIR: /data
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?dat-mat-khau-quan-tri}
+      AI_PROVIDER: vertex
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-thanhniensongdep}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-global}
+      VERTEX_MODEL: ${VERTEX_MODEL:-gemini-2.5-pro}
+      ALLOWED_ORIGINS: https://thanhniensongdep.vn,https://www.thanhniensongdep.vn
+      SITE_URL: ${SITE_URL:-https://thanhniensongdep.vn}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT: ${GOOGLE_OAUTH_REDIRECT:-https://api.thanhniensongdep.vn/api/admin/google/callback}
+      DRIVE_ROOT_NAME: ${DRIVE_ROOT_NAME:-Giải thưởng Thanh niên sống đẹp 2026}
+      DRIVE_SHARE_EMAILS: ${DRIVE_SHARE_EMAILS:-}
+    volumes:
+      - /mnt/tnsd-data:/data
+    expose:
+      - "5000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:

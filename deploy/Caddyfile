@@ -1,0 +1,7 @@
+api.thanhniensongdep.vn {
+	encode gzip
+	request_body {
+		max_size 30MB
+	}
+	reverse_proxy api:5000
+}
