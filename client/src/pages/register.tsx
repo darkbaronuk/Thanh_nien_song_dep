@@ -10,6 +10,30 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Header, Footer, Countdown } from "@/components/site";
 import { API_BASE } from "@/lib/queryClient";
+
+// Nộp hồ sơ gửi thẳng tới máy chủ API, không đi qua bộ chuyển tiếp của Vercel
+// (bộ chuyển tiếp ngắt kết nối khi tổng dung lượng vượt khoảng 12 MB).
+const UPLOAD_BASE =
+  typeof window !== "undefined" && /(^|\.)thanhniensongdep\.vn$/.test(window.location.hostname)
+    ? "https://api.thanhniensongdep.vn"
+    : API_BASE;
+const MAX_TOTAL_MB = 28;
+
+function fmtSize(bytes: number) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function readMessage(res: Response, fallback: string) {
+  const text = await res.text().catch(() => "");
+  try {
+    const d = JSON.parse(text);
+    return { data: d, message: (d && d.message) || fallback };
+  } catch {
+    if (res.status === 413 || res.status === 502)
+      return { data: null, message: "Tổng dung lượng tệp đính kèm quá lớn hoặc kết nối bị gián đoạn. Vui lòng nén ảnh, giảm số tệp rồi gửi lại." };
+    return { data: null, message: `${fallback} (mã lỗi ${res.status}). Vui lòng thử lại sau ít phút.` };
+  }
+}
 import { CANDIDATE_GROUPS, FIELDS, FILE_SLOTS, NOMINATOR_TYPES } from "@shared/schema";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Download, FileUp, Loader2, Trash2 } from "lucide-react";
@@ -136,10 +160,20 @@ export default function Register() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const totalBytes = Object.values(files).reduce((sum, list) => sum + list.reduce((a, file) => a + file.size, 0), 0);
+
   const submit = async (confirmDuplicate = false) => {
     const e = [0, 1, 2].flatMap(stepErrors);
     if (e.length) {
       toast({ title: "Hồ sơ chưa hợp lệ", description: e.join(" · "), variant: "destructive" });
+      return;
+    }
+    if (totalBytes > MAX_TOTAL_MB * 1024 * 1024) {
+      toast({
+        title: "Dung lượng tệp quá lớn",
+        description: `Tổng dung lượng hiện là ${fmtSize(totalBytes)}, vượt mức ${MAX_TOTAL_MB} MB cho một lần gửi. Vui lòng nén ảnh hoặc bản scan, giảm số tệp minh chứng rồi gửi lại.`,
+        variant: "destructive",
+      });
       return;
     }
     setSubmitting(true);
@@ -148,15 +182,19 @@ export default function Register() {
       Object.entries(f).forEach(([k, v]) => fd.append(k, v));
       if (confirmDuplicate) fd.append("confirmDuplicate", "1");
       Object.entries(files).forEach(([slot, list]) => list.forEach((file) => fd.append(slot, file)));
-      const res = await fetch(`${API_BASE}/api/nominations`, { method: "POST", body: fd });
-      if (res.status === 409) {
-        const d = await res.json();
-        setDup({ message: d.message || "Hồ sơ có dấu hiệu trùng", items: d.duplicate || [] });
+      let res: Response;
+      try {
+        res = await fetch(`${UPLOAD_BASE}/api/nominations`, { method: "POST", body: fd });
+      } catch {
+        throw new Error("Mất kết nối trong khi tải tệp lên. Vui lòng kiểm tra mạng, giảm dung lượng tệp rồi gửi lại.");
+      }
+      const { data, message } = await readMessage(res, "Gửi hồ sơ thất bại");
+      if (res.status === 409 && data) {
+        setDup({ message: data.message || "Hồ sơ có dấu hiệu trùng", items: data.duplicate || [] });
         setSubmitting(false);
         return;
       }
-      if (!res.ok) throw new Error((await res.json()).message || "Gửi hồ sơ thất bại");
-      const data = await res.json();
+      if (!res.ok || !data) throw new Error(message);
       setDup(null);
       setDone(data.code);
       window.scrollTo({ top: 0 });
@@ -508,10 +546,18 @@ export default function Register() {
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             ) : (
+              <div className="flex flex-wrap items-center justify-end gap-3">
+              <span
+                className={`text-sm ${totalBytes > MAX_TOTAL_MB * 1024 * 1024 ? "font-semibold text-destructive" : "text-muted-foreground"}`}
+                data-testid="text-total-size"
+              >
+                Tổng dung lượng: {fmtSize(totalBytes)} / tối đa {MAX_TOTAL_MB} MB
+              </span>
               <Button onClick={() => submit()} disabled={submitting} data-testid="button-submit">
                 {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 {submitting ? "Đang gửi hồ sơ…" : "Gửi hồ sơ"}
               </Button>
+              </div>
             )}
           </div>
         </Card>
