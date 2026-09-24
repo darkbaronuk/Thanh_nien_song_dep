@@ -415,6 +415,20 @@ export default function Register() {
 
           {step === 2 && (
             <div className="space-y-5">
+              <div
+                className={`rounded-md border px-4 py-3 text-sm ${totalBytes > MAX_TOTAL_MB * 1024 * 1024 ? "border-destructive/50 bg-destructive/10" : "border-primary/30 bg-primary/5"}`}
+                data-testid="note-upload-limit"
+              >
+                <p className="font-semibold">Lưu ý về dung lượng tệp</p>
+                <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-muted-foreground">
+                  <li>Mỗi tệp tối đa 25 MB; tổng dung lượng toàn bộ hồ sơ tối đa {MAX_TOTAL_MB} MB cho một lần gửi.</li>
+                  <li>Ảnh chụp từ điện thoại nên giảm kích thước về khoảng 1–2 MB mỗi ảnh; bản scan nên lưu dạng PDF nén.</li>
+                  <li>Minh chứng dạng video hoặc tệp rất lớn vui lòng tải lên Google Drive và dán đường liên kết vào tài liệu.</li>
+                </ul>
+                <p className={`mt-2 font-medium ${totalBytes > MAX_TOTAL_MB * 1024 * 1024 ? "text-destructive" : "text-foreground"}`}>
+                  Đã chọn: {fmtSize(totalBytes)} / {MAX_TOTAL_MB} MB
+                </p>
+              </div>
               {FILE_SLOTS.map((s) => {
                 const list = files[s.key] || [];
                 return (
@@ -489,7 +503,7 @@ export default function Register() {
                 );
               })}
               <p className="text-xs text-muted-foreground">
-                Định dạng khuyến nghị: PDF, DOC/DOCX, JPG, PNG. Dung lượng mỗi tệp tối đa 25 MB.
+                Định dạng khuyến nghị: PDF, DOC/DOCX, JPG, PNG. Mỗi tệp tối đa 25 MB, tổng hồ sơ tối đa {MAX_TOTAL_MB} MB.
               </p>
             </div>
           )}
