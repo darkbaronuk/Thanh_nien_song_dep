@@ -16,8 +16,50 @@ const AI_PROVIDER = (process.env.AI_PROVIDER || "anthropic").toLowerCase();
 const VERTEX_MODEL = process.env.VERTEX_MODEL || "gemini-2.5-pro";
 const VERTEX_LOCATION = process.env.GOOGLE_CLOUD_LOCATION || "global";
 
-/** Gọi mô hình theo nhà cung cấp đã cấu hình, trả về văn bản trả lời. */
+const VERTEX_FALLBACK_MODEL = process.env.VERTEX_FALLBACK_MODEL || "gemini-2.5-flash";
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function isQuotaError(e: any) {
+  const m = String(e?.message || e || "");
+  return e?.status === 429 || e?.code === 429 || /\b429\b|RESOURCE_EXHAUSTED|Resource exhausted/i.test(m);
+}
+function isTransient(e: any) {
+  const m = String(e?.message || e || "");
+  return isQuotaError(e) || /\b(500|502|503|504)\b|UNAVAILABLE|INTERNAL|DEADLINE_EXCEEDED|ECONNRESET|ETIMEDOUT|fetch failed/i.test(m);
+}
+
+// Hàng đợi: mỗi lần chỉ gửi một yêu cầu tới mô hình để tránh vượt hạn mức khi nhiều hồ sơ nộp cùng lúc
+let queue: Promise<unknown> = Promise.resolve();
+function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(fn, fn);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+/** Gọi mô hình, tự thử lại khi Vertex AI báo quá tải (429) hoặc lỗi tạm thời; lần cuối chuyển sang mô hình dự phòng. */
 async function callModel(system: string, content: any[]): Promise<string> {
+  return enqueue(async () => {
+    const delays = [10_000, 30_000, 60_000, 120_000];
+    let lastErr: any;
+    for (let i = 0; i <= delays.length; i++) {
+      try {
+        return await callModelOnce(system, content, VERTEX_MODEL);
+      } catch (e: any) {
+        lastErr = e;
+        if (!isTransient(e) || i === delays.length) break;
+        console.warn(`AI tạm lỗi (lần ${i + 1}), thử lại sau ${delays[i] / 1000}s:`, String(e?.message || e).slice(0, 120));
+        await sleep(delays[i] + Math.floor(Math.random() * 3000));
+      }
+    }
+    if (AI_PROVIDER === "vertex" && isTransient(lastErr) && VERTEX_FALLBACK_MODEL && VERTEX_FALLBACK_MODEL !== VERTEX_MODEL) {
+      console.warn(`Chuyển sang mô hình dự phòng ${VERTEX_FALLBACK_MODEL}`);
+      return await callModelOnce(system, content, VERTEX_FALLBACK_MODEL);
+    }
+    throw lastErr;
+  });
+}
+
+async function callModelOnce(system: string, content: any[], model: string): Promise<string> {
   if (AI_PROVIDER === "vertex") {
     const ai = new GoogleGenAI({
       vertexai: true,
@@ -29,7 +71,7 @@ async function callModel(system: string, content: any[]): Promise<string> {
       return { inlineData: { mimeType: c.source.media_type, data: c.source.data } };
     });
     const res = await ai.models.generateContent({
-      model: VERTEX_MODEL,
+      model,
       contents: [{ role: "user", parts }],
       config: {
         systemInstruction: system,

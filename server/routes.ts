@@ -373,11 +373,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       storage.update(id, { aiStatus: "xong", aiResult: JSON.stringify(result) });
     } catch (e: any) {
       console.error("AI error", id, e?.message);
-      storage.update(id, { aiStatus: "loi", aiResult: JSON.stringify({ error: e?.message || "Lỗi AI" }) });
+      const msg = String(e?.message || "");
+      const friendly = /429|RESOURCE_EXHAUSTED|Resource exhausted/i.test(msg)
+        ? "Dịch vụ AI của Google đang quá tải tạm thời. Hệ thống sẽ tự chạy lại sau ít phút; có thể bấm \"Chạy lại AI\" để thử ngay."
+        : msg || "Lỗi AI";
+      storage.update(id, { aiStatus: "loi", aiResult: JSON.stringify({ error: friendly, raw: msg.slice(0, 500) }) });
     }
     // Sau khi có kết quả AI thì đồng bộ hồ sơ lên Google Drive
     await drive.syncNominationSafe(id);
   }
+
+  // Tự chạy lại các hồ sơ lỗi do quá tải AI, 15 phút một lần
+  setInterval(async () => {
+    const retry = storage
+      .list()
+      .filter((n) => n.aiStatus === "loi" && /quá tải|429|RESOURCE_EXHAUSTED/i.test(n.aiResult || ""));
+    for (const n of retry) await runAnalyze(n.id);
+  }, 15 * 60 * 1000);
 
   // ---------- Google Drive ----------
   app.get("/api/admin/google/status", requireAdmin, (_req, res) => {
